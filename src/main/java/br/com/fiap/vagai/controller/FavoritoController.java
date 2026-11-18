@@ -1,6 +1,6 @@
 package br.com.fiap.vagai.controller;
 
-import br.com.fiap.vagai.config.Sessao;
+import br.com.fiap.vagai.config.Autenticacao;
 import br.com.fiap.vagai.dao.*;
 import br.com.fiap.vagai.dto.*;
 import br.com.fiap.vagai.exception.*;
@@ -21,63 +21,63 @@ import java.util.List;
 public class FavoritoController {
     private final FavoritoDao dao;
     private final EstacionamentoDao locais;
-    private final Sessao sessao;
+    private final Autenticacao autenticacao;
     private final ModelMapper mapper;
 
-    public FavoritoController(FavoritoDao dao, EstacionamentoDao locais, Sessao sessao, ModelMapper mapper) {
+    public FavoritoController(FavoritoDao dao, EstacionamentoDao locais, Autenticacao autenticacao, ModelMapper mapper) {
         this.dao = dao;
         this.locais = locais;
-        this.sessao = sessao;
+        this.autenticacao = autenticacao;
         this.mapper = mapper;
     }
 
     @GetMapping({"/favoritos", "/usuarios/me/favoritos"})
-    public List<FavoritoSaida> listar(HttpServletRequest request) throws SQLException {
-        return dao.doUsuario(sessao.atual(request).getId()).stream().map(this::saida).toList();
+    public List<FavoritoResponseDto> listar(HttpServletRequest request) throws SQLException {
+        return dao.doUsuario(autenticacao.atual(request).getId()).stream().map(this::saida).toList();
     }
 
     @GetMapping("/favoritos/{id}")
-    public FavoritoSaida buscar(@PathVariable long id, HttpServletRequest request) throws SQLException {
-        long usuario = sessao.atual(request).getId();
+    public FavoritoResponseDto buscar(@PathVariable long id, HttpServletRequest request) throws SQLException {
+        long usuario = autenticacao.atual(request).getId();
         Favorito registro = dao.buscar(id);
-        if (registro.getIdUsuario() != usuario) throw new SemPermissao();
+        if (registro.getIdUsuario() != usuario) throw new SemPermissaoException();
         return saida(registro);
     }
 
     @PostMapping("/favoritos")
-    public ResponseEntity<FavoritoSaida> criar(@Valid @RequestBody FavoritoEntrada entrada,
+    public ResponseEntity<FavoritoResponseDto> cadastrar(@Valid @RequestBody FavoritoRequestDto dto,
                                           HttpServletRequest request) throws SQLException {
-        Usuario usuario = sessao.atual(request);
-        Favorito registro = mapper.map(entrada, Favorito.class);
+        Usuario usuario = autenticacao.atual(request);
+        Favorito registro = mapper.map(dto, Favorito.class);
         registro.setUsuario(usuario);
         registro.setData(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
-        registro.setEstacionamento(locais.buscar(entrada.getIdEstacionamento()));
-        dao.inserir(registro);
+        registro.setEstacionamento(locais.buscar(dto.getIdEstacionamento()));
+        dao.cadastrar(registro);
         return ResponseEntity.created(URI.create("/favoritos/" + registro.getId())).body(saida(registro));
     }
 
     @PutMapping("/favoritos/{id}")
-    public FavoritoSaida atualizar(@PathVariable long id, @Valid @RequestBody FavoritoEntrada entrada,
+    public FavoritoResponseDto atualizar(@PathVariable long id, @Valid @RequestBody FavoritoRequestDto dto,
                               HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
+        autenticacao.atual(request);
         Favorito registro = dao.buscar(id);
-        sessao.exigirDono(request, registro.getIdUsuario());
-        locais.buscar(entrada.getIdEstacionamento());
-        mapper.map(entrada, registro);
+        autenticacao.exigirDono(request, registro.getIdUsuario());
+        locais.buscar(dto.getIdEstacionamento());
+        mapper.map(dto, registro);
         dao.atualizar(registro);
         return saida(dao.buscar(id));
     }
 
     @DeleteMapping("/favoritos/{id}")
-    public ResponseEntity<Void> excluir(@PathVariable long id, HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
+    public ResponseEntity<Void> remover(@PathVariable long id, HttpServletRequest request) throws SQLException {
+        autenticacao.atual(request);
         Favorito registro = dao.buscar(id);
-        sessao.exigirDono(request, registro.getIdUsuario());
-        dao.excluir(id);
+        autenticacao.exigirDono(request, registro.getIdUsuario());
+        dao.remover(id);
         return ResponseEntity.noContent().build();
     }
 
-    private FavoritoSaida saida(Favorito registro) {
-        return mapper.map(registro, FavoritoSaida.class);
+    private FavoritoResponseDto saida(Favorito registro) {
+        return mapper.map(registro, FavoritoResponseDto.class);
     }
 }

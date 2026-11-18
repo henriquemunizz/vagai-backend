@@ -1,6 +1,6 @@
 package br.com.fiap.vagai.controller;
 
-import br.com.fiap.vagai.config.Sessao;
+import br.com.fiap.vagai.config.Autenticacao;
 import br.com.fiap.vagai.dao.*;
 import br.com.fiap.vagai.dto.*;
 import br.com.fiap.vagai.exception.*;
@@ -21,71 +21,79 @@ import java.util.List;
 public class RegraController {
     private final RegraDao dao;
     private final EstacionamentoDao locais;
-    private final Sessao sessao;
+    private final Autenticacao autenticacao;
     private final ModelMapper mapper;
 
-    public RegraController(RegraDao dao, EstacionamentoDao locais, Sessao sessao, ModelMapper mapper) {
+    public RegraController(RegraDao dao, EstacionamentoDao locais, Autenticacao autenticacao, ModelMapper mapper) {
         this.dao = dao;
         this.locais = locais;
-        this.sessao = sessao;
+        this.autenticacao = autenticacao;
         this.mapper = mapper;
     }
 
     @GetMapping("/regras")
-    public List<RegraSaida> listar() throws SQLException {
+    public List<RegraResponseDto> listar() throws SQLException {
         return dao.listar().stream().map(this::saida).toList();
     }
 
     @GetMapping("/regras/{id}")
-    public RegraSaida buscar(@PathVariable long id) throws SQLException {
+    public RegraResponseDto buscar(@PathVariable long id) throws SQLException {
         Regra registro = dao.buscar(id);
         return saida(registro);
     }
 
     @PostMapping("/regras")
-    public ResponseEntity<RegraSaida> criar(@Valid @RequestBody RegraEntrada entrada,
+    public ResponseEntity<RegraResponseDto> cadastrar(@Valid @RequestBody RegraRequestDto dto,
                                           HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
-        Regra registro = mapper.map(entrada, Regra.class);
-        exigirLocalEditavel(request, locais.bloquear(entrada.getIdEstacionamento()));
-        dao.inserir(registro);
+        autenticacao.atual(request);
+        Regra registro = mapper.map(dto, Regra.class);
+        exigirLocalEditavel(request, locais.bloquear(dto.getIdEstacionamento()));
+        dao.cadastrar(registro);
         return ResponseEntity.created(URI.create("/regras/" + registro.getId())).body(saida(registro));
     }
 
     @PutMapping("/regras/{id}")
-    public RegraSaida atualizar(@PathVariable long id, @Valid @RequestBody RegraEntrada entrada,
+    public RegraResponseDto atualizar(@PathVariable long id, @Valid @RequestBody RegraRequestDto dto,
                               HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
+        autenticacao.atual(request);
         Regra registro = dao.buscar(id);
         exigirLocalEditavel(request, locais.bloquear(registro.getIdEstacionamento()));
-        if (!registro.getIdEstacionamento().equals(entrada.getIdEstacionamento()))
-            throw new Conflito("O vínculo com o estacionamento é permanente.");
-        mapper.map(entrada, registro);
+        if (!registro.getIdEstacionamento().equals(dto.getIdEstacionamento()))
+            throw new ConflitoException("O vínculo com o estacionamento é permanente.");
+        mapper.map(dto, registro);
         dao.atualizar(registro);
         return saida(dao.buscar(id));
     }
 
     @DeleteMapping("/regras/{id}")
-    public ResponseEntity<Void> excluir(@PathVariable long id, HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
+    public ResponseEntity<Void> remover(@PathVariable long id, HttpServletRequest request) throws SQLException {
+        autenticacao.atual(request);
         Regra registro = dao.buscar(id);
         exigirLocalEditavel(request, locais.bloquear(registro.getIdEstacionamento()));
-        dao.excluir(id);
+        dao.remover(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/estacionamentos/{id}/regras")
-    public List<RegraSaida> doLocal(@PathVariable long id) throws SQLException {
+    public List<RegraResponseDto> doLocal(@PathVariable long id,
+            @RequestParam(required = false) Integer diaSemana,
+            @RequestParam(required = false) Integer minuto) throws SQLException {
         locais.buscar(id);
-        return dao.doLocal(id).stream().map(this::saida).toList();
+        if ((diaSemana == null) != (minuto == null))
+            throw new EntradaInvalidaException("Informe diaSemana e minuto juntos.");
+        if (diaSemana != null && (diaSemana < 1 || diaSemana > 7 || minuto < 0 || minuto > 1439))
+            throw new EntradaInvalidaException("Dia deve estar entre 1 e 7 e minuto entre 0 e 1439.");
+        return dao.doLocal(id).stream()
+                .filter(regra -> diaSemana == null || regra.aplicaEm(diaSemana, minuto))
+                .map(this::saida).toList();
     }
 
     private void exigirLocalEditavel(HttpServletRequest request, Estacionamento local) throws SQLException {
-        sessao.exigirDono(request, local.getIdUsuarioCriador());
-        if (local.getIdOsm() != null || local.getVerificacao() != null) throw new SemPermissao();
+        autenticacao.exigirDono(request, local.getIdUsuarioCriador());
+        if (local.getIdOsm() != null || local.getVerificacao() != null) throw new SemPermissaoException();
     }
 
-    private RegraSaida saida(Regra registro) {
-        return mapper.map(registro, RegraSaida.class);
+    private RegraResponseDto saida(Regra registro) {
+        return mapper.map(registro, RegraResponseDto.class);
     }
 }

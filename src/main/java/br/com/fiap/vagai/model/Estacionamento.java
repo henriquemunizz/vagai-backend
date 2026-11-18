@@ -9,15 +9,16 @@ public class Estacionamento {
     private String nome;
     private String descricao;
     private String tipo;
-    private BigDecimal latitude;
-    private BigDecimal longitude;
-    private String endereco;
-    private BigDecimal preco;
-    private String horario;
     private String fonte;
     private String idOsm;
     private LocalDateTime verificacao;
     private Integer ativo;
+
+    private String rua;
+    private String bairro;
+    private String numero;
+    private BigDecimal primeiraHora;
+    private BigDecimal demaisHoras;
 
     public Estacionamento() {}
 
@@ -73,46 +74,6 @@ public class Estacionamento {
         this.tipo = tipo;
     }
 
-    public BigDecimal getLatitude() {
-        return latitude;
-    }
-
-    public void setLatitude(BigDecimal latitude) {
-        this.latitude = latitude;
-    }
-
-    public BigDecimal getLongitude() {
-        return longitude;
-    }
-
-    public void setLongitude(BigDecimal longitude) {
-        this.longitude = longitude;
-    }
-
-    public String getEndereco() {
-        return endereco;
-    }
-
-    public void setEndereco(String endereco) {
-        this.endereco = endereco;
-    }
-
-    public BigDecimal getPreco() {
-        return preco;
-    }
-
-    public void setPreco(BigDecimal preco) {
-        this.preco = preco;
-    }
-
-    public String getHorario() {
-        return horario;
-    }
-
-    public void setHorario(String horario) {
-        this.horario = horario;
-    }
-
     public String getFonte() {
         return fonte;
     }
@@ -143,5 +104,45 @@ public class Estacionamento {
 
     public void setAtivo(Integer ativo) {
         this.ativo = ativo;
+    }
+
+    public String getRua() {
+        return rua;
+    }
+
+    public void setRua(String rua) {
+        this.rua = rua;
+    }
+
+    public String getBairro() {
+        return bairro;
+    }
+
+    public void setBairro(String bairro) {
+        this.bairro = bairro;
+    }
+
+    public String getNumero() {
+        return numero;
+    }
+
+    public void setNumero(String numero) {
+        this.numero = numero;
+    }
+
+    public BigDecimal getPrimeiraHora() {
+        return primeiraHora;
+    }
+
+    public void setPrimeiraHora(BigDecimal primeiraHora) {
+        this.primeiraHora = primeiraHora;
+    }
+
+    public BigDecimal getDemaisHoras() {
+        return demaisHoras;
+    }
+
+    public void setDemaisHoras(BigDecimal demaisHoras) {
+        this.demaisHoras = demaisHoras;
     }
 }

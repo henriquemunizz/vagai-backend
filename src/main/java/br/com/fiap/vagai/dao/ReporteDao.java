@@ -2,18 +2,21 @@ package br.com.fiap.vagai.dao;
 
 import br.com.fiap.vagai.model.Reporte;
 import org.springframework.stereotype.Repository;
-import javax.sql.DataSource;
+import br.com.fiap.vagai.factory.ConnectionFactory;
+import br.com.fiap.vagai.exception.EntidadeNaoEncontradaException;
+import java.util.ArrayList;
 import java.sql.*;
 import java.util.List;
 
 @Repository
-public class ReporteDao extends JdbcDao<Reporte> {
-    public ReporteDao(DataSource origem) {
-        super(origem);
+public class ReporteDao {
+    private final ConnectionFactory factory;
+
+    public ReporteDao(ConnectionFactory factory) {
+        this.factory = factory;
     }
 
-    @Override
-    protected Reporte ler(ResultSet linha) throws SQLException {
+    private Reporte getReporte(ResultSet linha) throws SQLException {
         Reporte registro = new Reporte();
         registro.setId(linha.getLong("id_reporte"));
         registro.setIdUsuario(linha.getLong("id_usuario"));
@@ -25,36 +28,79 @@ public class ReporteDao extends JdbcDao<Reporte> {
     }
 
     public Reporte buscar(long id) throws SQLException {
-        return primeiro("SELECT * FROM tb_reporte WHERE id_reporte = ?", id);
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT * FROM tb_reporte WHERE id_reporte = ?")) {
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) throw new EntidadeNaoEncontradaException();
+                return getReporte(rs);
+            }
+        }
     }
 
     public List<Reporte> listar() throws SQLException {
-        return consultar("SELECT * FROM tb_reporte ORDER BY id_reporte");
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT * FROM tb_reporte ORDER BY id_reporte")) {
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<Reporte> lista = new ArrayList<>();
+                while (rs.next()) lista.add(getReporte(rs));
+                return lista;
+            }
+        }
     }
 
     public List<Reporte> doLocal(long id) throws SQLException {
-        return consultar("SELECT * FROM tb_reporte WHERE id_estacionamento = ? ORDER BY id_reporte DESC", id);
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT * FROM tb_reporte WHERE id_estacionamento = ? ORDER BY id_reporte DESC")) {
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<Reporte> lista = new ArrayList<>();
+                while (rs.next()) lista.add(getReporte(rs));
+                return lista;
+            }
+        }
     }
 
-    public void inserir(Reporte registro) throws SQLException {
-        registro.setId(proximoId("SELECT sq_tb_reporte.NEXTVAL FROM dual"));
-        executar("""
+    public void cadastrar(Reporte registro) throws SQLException {
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT sq_tb_reporte.NEXTVAL FROM dual");
+             ResultSet rs = stmt.executeQuery()) {
+            rs.next();
+            registro.setId(rs.getLong(1));
+        }
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("""
                 INSERT INTO tb_reporte (id_reporte, id_usuario, id_estacionamento, tp_reporte,
                     ds_observacao, dt_reporte)
                 VALUES (?, ?, ?, ?,
                     ?, ?)
-                """,
-                registro.getId(), registro.getIdUsuario(), registro.getIdEstacionamento(), registro.getTipo(), 
-                registro.getObservacao(), registro.getData());
+                """)) {
+            stmt.setLong(1, registro.getId());
+            stmt.setLong(2, registro.getIdUsuario());
+            stmt.setLong(3, registro.getIdEstacionamento());
+            stmt.setString(4, registro.getTipo());
+            stmt.setString(5, registro.getObservacao());
+            stmt.setTimestamp(6, Timestamp.valueOf(registro.getData()));
+            stmt.executeUpdate();
+        }
     }
 
     public void atualizar(Reporte registro) throws SQLException {
-        executar("UPDATE tb_reporte SET tp_reporte = ?, ds_observacao = ? WHERE id_reporte = ?",
-                registro.getTipo(), registro.getObservacao(), registro.getId());
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("UPDATE tb_reporte SET tp_reporte = ?, ds_observacao = ? WHERE id_reporte = ?")) {
+            stmt.setString(1, registro.getTipo());
+            stmt.setString(2, registro.getObservacao());
+            stmt.setLong(3, registro.getId());
+            if (stmt.executeUpdate() == 0) throw new EntidadeNaoEncontradaException();
+        }
     }
 
-    public void excluir(long id) throws SQLException {
-        if (executar("DELETE FROM tb_reporte WHERE id_reporte = ?", id) == 0)
-            throw new br.com.fiap.vagai.exception.NaoEncontrado();
+    public void remover(long id) throws SQLException {
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("DELETE FROM tb_reporte WHERE id_reporte = ?")) {
+            stmt.setLong(1, id);
+            if (stmt.executeUpdate() == 0) throw new EntidadeNaoEncontradaException();
+        }
     }
 }

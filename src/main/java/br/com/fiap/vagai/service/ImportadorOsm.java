@@ -1,14 +1,15 @@
 package br.com.fiap.vagai.service;
 
 import br.com.fiap.vagai.model.Estacionamento;
+import br.com.fiap.vagai.dto.ElementoOsmResponseDto;
+import br.com.fiap.vagai.dto.OverpassResponseDto;
+import br.com.fiap.vagai.bo.EstacionamentoOsmBo;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.net.*;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
@@ -20,17 +21,13 @@ import java.util.*;
 @Component
 @Profile("importar")
 public class ImportadorOsm implements CommandLineRunner {
-    public record Centro(BigDecimal lat, BigDecimal lon) {}
-    public record Elemento(String type, long id, BigDecimal lat, BigDecimal lon, Centro center,
-                           Map<String, String> tags) {}
-    public record Resposta(List<Elemento> elements, String remark) {}
 
-    private final SincronizacaoOsm sincronizacao;
+    private final EstacionamentoOsmBo sincronizacao;
     private final String bbox;
     private final int timeout;
     private final URI endpoint;
 
-    public ImportadorOsm(SincronizacaoOsm sincronizacao, @Value("${vagai.osm.bbox}") String bbox,
+    public ImportadorOsm(EstacionamentoOsmBo sincronizacao, @Value("${vagai.osm.bbox}") String bbox,
                          @Value("${vagai.osm.timeout}") int timeout, @Value("${vagai.osm.url}") URI endpoint) {
         this.sincronizacao = sincronizacao;
         this.bbox = bbox;
@@ -44,13 +41,13 @@ public class ImportadorOsm implements CommandLineRunner {
         if (arquivos != null && (arquivos.size() != 1 || arquivos.getFirst().isBlank()))
             throw new IllegalArgumentException("Informe --osm-arquivo=caminho.json");
         String json = arquivos == null ? consultarOverpass() : Files.readString(Path.of(arquivos.getFirst()));
-        Resposta resposta = new ObjectMapper().readValue(json, Resposta.class);
-        if (resposta.elements == null || resposta.remark != null)
+        OverpassResponseDto resposta = new ObjectMapper().readValue(json, OverpassResponseDto.class);
+        if (resposta.getElements() == null || resposta.getRemark() != null)
             throw new IllegalStateException("Resposta Overpass incompleta.");
         int aceitos = 0;
-        for (Elemento e : resposta.elements) {
-            if (e.type == null || !Set.of("node", "way", "relation").contains(e.type) || e.id <= 0) continue;
-            String chave = e.type + "/" + e.id;
+        for (ElementoOsmResponseDto e : resposta.getElements()) {
+            if (e.getType() == null || !Set.of("node", "way", "relation").contains(e.getType()) || e.getId() <= 0) continue;
+            String chave = e.getType() + "/" + e.getId();
             Estacionamento local = converter(e, chave);
             if (local == null) sincronizacao.suspender(chave);
             else {
@@ -58,7 +55,7 @@ public class ImportadorOsm implements CommandLineRunner {
                 aceitos++;
             }
         }
-        System.out.printf("Recebidos %d elementos. Classificados %d.%n", resposta.elements.size(), aceitos);
+        System.out.printf("Recebidos %d elementos. Classificados %d.%n", resposta.getElements().size(), aceitos);
     }
 
     private String consultarOverpass() throws Exception {
@@ -82,26 +79,25 @@ public class ImportadorOsm implements CommandLineRunner {
         return http.body();
     }
 
-    static Estacionamento converter(Elemento e, String chave) {
-        Map<String, String> tags = e.tags;
+    static Estacionamento converter(ElementoOsmResponseDto e, String chave) {
+        Map<String, String> tags = e.getTags();
         if (tags == null || !"parking".equals(tags.get("amenity"))) return null;
         // O tipo do operador indica a categoria. A tarifa é uma informação separada.
         if (!"private".equals(tags.get("operator:type")) || !"yes".equals(tags.get("access")) ||
             tags.keySet().stream().anyMatch(k -> k.endsWith(":conditional"))) return null;
-        Centro centro = e.type.equals("node") ? new Centro(e.lat, e.lon) : e.center;
-        if (centro == null || centro.lat == null || centro.lon == null ||
-            centro.lat.abs().doubleValue() > 90 || centro.lon.abs().doubleValue() > 180) return null;
+        String rua = limitar(tags.get("addr:street"), 150);
+        String bairro = limitar(tags.get("addr:suburb"), 100);
+        String numero = limitar(tags.get("addr:housenumber"), 20);
+        if (rua == null || bairro == null || numero == null) return null;
         Estacionamento local = new Estacionamento();
         local.setIdOsm(chave);
         local.setNome(limitar(tags.getOrDefault("name", "Estacionamento " + chave), 100));
         local.setTipo("PRIVADO");
-        local.setFonte("OpenStreetMap");
-        local.setLatitude(centro.lat.setScale(7, RoundingMode.HALF_UP));
-        local.setLongitude(centro.lon.setScale(7, RoundingMode.HALF_UP));
+        local.setFonte("OSM");
+        local.setRua(rua);
+        local.setBairro(bairro);
+        local.setNumero(numero);
         local.setAtivo(1);
-        local.setHorario(limitar(tags.get("opening_hours"), 255));
-        local.setEndereco(limitar(String.join(" ", tags.getOrDefault("addr:street", ""),
-                tags.getOrDefault("addr:housenumber", "")).strip(), 255));
         StringJoiner info = new StringJoiner(", ");
         for (String tag : List.of("access", "fee", "capacity", "parking", "charge"))
             if (tags.containsKey(tag)) info.add(tag + "=" + tags.get(tag));

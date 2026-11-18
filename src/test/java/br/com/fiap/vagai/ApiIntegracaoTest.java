@@ -1,7 +1,11 @@
 package br.com.fiap.vagai;
 
 import br.com.fiap.vagai.service.*;
-import com.sun.net.httpserver.HttpServer;
+import br.com.fiap.vagai.bo.EstacionamentoOsmBo;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpSession;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.*;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,35 +16,37 @@ import javax.sql.DataSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import java.net.*;
-import java.net.http.*;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+@AutoConfigureMockMvc
+@SpringBootTest(properties = {
     "spring.datasource.url=jdbc:h2:mem:vagai;MODE=Oracle;DB_CLOSE_DELAY=-1",
     "spring.datasource.username=sa", "spring.datasource.password="})
 class ApiIntegracaoTest {
     @org.junit.jupiter.api.io.TempDir Path temporario;
-    @Value("${local.server.port}") int porta;
+    @Autowired MockMvc mvc;
     @Autowired DataSource origem;
-    @Autowired SincronizacaoOsm sincronizacao;
+    @Autowired EstacionamentoOsmBo sincronizacao;
     final ObjectMapper json = new ObjectMapper();
 
     class Cliente {
-        final HttpClient http = HttpClient.newBuilder().cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL)).build();
+        MockHttpSession sessao;
 
         JsonNode enviar(String metodo, String rota, Object corpo, int esperado) throws Exception {
-            var pedido = HttpRequest.newBuilder(URI.create("http://localhost:" + porta + rota))
-                    .header("Content-Type", "application/json").method(metodo, corpo == null ?
-                            HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(json.writeValueAsString(corpo)));
-            var resposta = http.send(pedido.build(), HttpResponse.BodyHandlers.ofString());
-            assertEquals(esperado, resposta.statusCode(), metodo + " " + rota + " " + resposta.body());
-            if (esperado == 201) assertTrue(resposta.headers().firstValue("Location").isPresent());
-            if (esperado == 204) { assertEquals("", resposta.body()); return null; }
-            JsonNode dados = json.readTree(resposta.body());
+            var pedido = request(org.springframework.http.HttpMethod.valueOf(metodo), URI.create(rota))
+                    .contentType("application/json");
+            if (sessao != null && !sessao.isInvalid()) pedido.session(sessao);
+            if (corpo != null) pedido.content(json.writeValueAsString(corpo));
+            var resultado = mvc.perform(pedido).andReturn();
+            sessao = (MockHttpSession) resultado.getRequest().getSession(false);
+            var resposta = resultado.getResponse();
+            assertEquals(esperado, resposta.getStatus(), metodo + " " + rota + " " + resposta.getContentAsString());
+            if (esperado == 201) assertNotNull(resposta.getHeader("Location"));
+            if (esperado == 204) { assertEquals("", resposta.getContentAsString()); return null; }
+            JsonNode dados = json.readTree(resposta.getContentAsString(java.nio.charset.StandardCharsets.UTF_8));
             if (esperado >= 400) assertEquals(esperado, dados.get("status").asInt());
             return dados;
         }
@@ -53,21 +59,18 @@ class ApiIntegracaoTest {
 
     @Test
     void corsParaReact() throws Exception {
-        var http = HttpClient.newHttpClient();
         for (String origemTeste : List.of("http://localhost:5173", "https://outra.example")) {
-            var pedido = HttpRequest.newBuilder(URI.create("http://localhost:" + porta + "/auth/login"))
-                    .header("Origin", origemTeste).header("Access-Control-Request-Method", "POST")
-                    .header("Access-Control-Request-Headers", "content-type")
-                    .method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build();
-            var resposta = http.send(pedido, HttpResponse.BodyHandlers.ofString());
+            var resposta = mvc.perform(options("/auth/login").header("Origin", origemTeste)
+                    .header("Access-Control-Request-Method", "POST")
+                    .header("Access-Control-Request-Headers", "content-type")).andReturn().getResponse();
             if (origemTeste.equals("http://localhost:5173")) {
-                assertEquals(200, resposta.statusCode());
-                assertEquals(origemTeste, resposta.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
-                assertEquals("true", resposta.headers().firstValue("Access-Control-Allow-Credentials").orElseThrow());
+                assertEquals(200, resposta.getStatus());
+                assertEquals(origemTeste, resposta.getHeader("Access-Control-Allow-Origin"));
+                assertEquals("true", resposta.getHeader("Access-Control-Allow-Credentials"));
             } else {
-                assertEquals(403, resposta.statusCode());
-                assertEquals(403, json.readTree(resposta.body()).get("status").asInt());
-                assertTrue(resposta.headers().firstValue("Access-Control-Allow-Origin").isEmpty());
+                assertEquals(403, resposta.getStatus());
+                assertEquals(403, json.readTree(resposta.getContentAsString()).get("status").asInt());
+                assertNull(resposta.getHeader("Access-Control-Allow-Origin"));
             }
         }
     }
@@ -106,7 +109,7 @@ class ApiIntegracaoTest {
         bia.delete(perfil, 403);
 
         var local = new HashMap<String,Object>(Map.of("nome", "Local colaborativo", "tipo", "ROTATIVO",
-                "latitude", 0, "longitude", 0, "ativo", 1));
+                "rua", "Rua Teste API", "bairro", "Centro", "numero", "20", "ativo", 1));
         String locais = "/estacionamentos";
         publico.post(locais, local, 401);
         long id = ana.post(locais, local, 201).get("id").asLong();
@@ -115,11 +118,12 @@ class ApiIntegracaoTest {
         publico.get(locais, 200);
         bia.put(lugar, local, 403);
         bia.delete(lugar, 403);
-        local.put("longitude", 0.001);
+        local.put("numero", "25");
         ana.put(lugar, local, 200);
         var nota = Map.of("nota", 5, "comentario", "Boa localização");
         var relato = Map.of("tipo", "SEM_VAGA");
         String av = "/avaliacoes/" + ana.post(lugar + "/avaliacoes", nota, 201).get("id").asLong();
+        ana.post(lugar + "/avaliacoes", nota, 409);
         String re = "/reportes/" + ana.post(lugar + "/reportes", relato, 201).get("id").asLong();
         var avaliacao = Map.of("nota", 4, "idEstacionamento", id);
         var reporte = Map.of("tipo", "VAGA_ENCONTRADA", "idEstacionamento", id);
@@ -127,7 +131,8 @@ class ApiIntegracaoTest {
         String re2 = "/reportes/" + bia.post("/reportes", reporte, 201).get("id").asLong();
         bia.delete(av2, 204);
         bia.delete(re2, 204);
-        var regra = Map.of("descricao", "Até duas horas", "idEstacionamento", id, "ativo", 1);
+        var regra = Map.of("descricao", "Proibido à noite", "idEstacionamento", id, "ativo", 1,
+                "diaSemana", 1, "inicio", 1200, "fim", 360, "tipo", "PROIBIDO");
         String rg = "/regras/" + ana.post("/regras", regra, 201).get("id").asLong();
         bia.post("/regras", regra, 403);
         var favorito = Map.of("idEstacionamento", id);
@@ -150,31 +155,49 @@ class ApiIntegracaoTest {
         ana.delete(lugar, 409);
         ana.post(lugar + "/avaliacoes", Map.of("nota", 6), 400);
         ana.post("/estacionamentos/999999/reportes", relato, 404);
-        String busca = locais + "/proximos?latitude=0&longitude=0&raioKm=1&tipo=ROTATIVO";
-        var proximo = publico.get(busca, 200).get(0);
-        assertEquals(4, proximo.get("mediaAvaliacoes").asInt());
-        assertEquals(0.1112, proximo.get("distanciaKm").asDouble(), 0.0001);
-        assertEquals(1, proximo.get("regras").size());
-        assertTrue(proximo.get("ultimoReporteRecente").get("atual").asBoolean());
-        var perto = new HashMap<>(local);
-        perto.put("longitude", 0);
-        String outro = locais + "/" + ana.post(locais, perto, 201).get("id").asLong();
-        var ordenados = publico.get(busca, 200);
-        assertEquals(2, ordenados.size());
-        assertEquals(0.0, ordenados.get(0).get("distanciaKm").asDouble());
-        assertEquals(id, ordenados.get(1).get("id").asLong());
-        assertEquals(1, publico.get(busca.replace("raioKm=1", "raioKm=0.05"), 200).size());
-        ana.delete(outro, 204);
+        String busca = locais + "?rua=rua%20teste%20api";
+        assertEquals(1, publico.get(busca, 200).size());
+        assertEquals("25", publico.get(busca, 200).get(0).get("numero").asString());
+        assertEquals(1, publico.get(lugar + "/regras?diaSemana=2&minuto=359", 200).size());
+        assertEquals(0, publico.get(lugar + "/regras?diaSemana=2&minuto=360", 200).size());
+        publico.get(lugar + "/regras?diaSemana=8&minuto=10", 400);
+        publico.get(lugar + "/regras?diaSemana=1", 400);
+        var invalida = new HashMap<String,Object>(regra);
+        invalida.put("inicio", 1440);
+        ana.post("/regras", invalida, 400);
+        var outroLocal = new HashMap<>(local);
+        outroLocal.put("tipo", "GRATUITO");
+        outroLocal.put("numero", "10");
+        String gratuito = locais + "/" + ana.post(locais, outroLocal, 201).get("id").asLong();
+        outroLocal.put("primeiraHora", 5);
+        ana.post(locais, outroLocal, 400);
+        outroLocal.put("tipo", "PRIVADO");
+        ana.post(locais, outroLocal, 400);
+        outroLocal.put("primeiraHora", 18);
+        outroLocal.put("demaisHoras", 8);
+        outroLocal.put("numero", "30A");
+        String privado = locais + "/" + ana.post(locais, outroLocal, 201).get("id").asLong();
+        var lista = publico.get(busca, 200);
+        assertEquals(3, lista.size());
+        assertEquals(Set.of("GRATUITO", "ROTATIVO", "PRIVADO"),
+                new HashSet<>(List.of(lista.get(0).get("tipo").asString(),
+                        lista.get(1).get("tipo").asString(), lista.get(2).get("tipo").asString())));
+        assertEquals(18, publico.get(privado, 200).get("primeiraHora").asInt());
+        assertEquals(0, publico.get(busca + "&bairro=Outro", 200).size());
+        assertEquals(0, publico.get(locais + "?rua=%25", 200).size());
+        ana.delete(gratuito, 204);
+        ana.delete(privado, 204);
         banco.update("UPDATE tb_reporte SET dt_reporte = TIMESTAMP '2020-01-01 00:00:00' WHERE id_estacionamento = ?", id);
-        assertTrue(publico.get(busca, 200).get(0).get("ultimoReporteRecente").isNull());
         assertFalse(publico.get(re, 200).get("atual").asBoolean());
-        publico.get(busca.replace("latitude=0", "latitude=91"), 400);
+        ana.delete(perfil, 409);
         local.put("ativo", 0);
         ana.put(lugar, local, 200);
         ana.post(lugar + "/reportes", relato, 409);
         assertEquals(0, publico.get(busca, 200).size());
         local.put("ativo", 1);
         local.put("tipo", "PRIVADO");
+        local.put("primeiraHora", 18);
+        local.put("demaisHoras", 8);
         ana.put(lugar, local, 200);
         ana.post(lugar + "/reportes", relato, 409);
         publico.get("/inexistente", 404);
@@ -188,7 +211,10 @@ class ApiIntegracaoTest {
         ana.post("/auth/logout", null, 204);
         ana.get("/auth/me", 401);
         ana.post("/auth/login", conta, 200);
+        var contaLocal = new HashMap<>(local);
+        long orfao = ana.post(locais, contaLocal, 201).get("id").asLong();
         ana.delete(perfil, 204);
+        assertTrue(publico.get(locais + "/" + orfao, 200).get("idUsuarioCriador").isNull());
         ana.get("/auth/me", 401);
         banco.execute("ALTER TABLE tb_reporte RENAME TO tb_reporte_indisponivel");
         try {
@@ -201,40 +227,31 @@ class ApiIntegracaoTest {
     private void verificarImportacao(Cliente cliente, JdbcTemplate banco) throws Exception {
         var corpo = new AtomicReference<>("""
                 {"version":0.6,"elements":[{"type":"way","id":42,"center":{"lat":0,"lon":0},
-                "tags":{"amenity":"parking","operator:type":"private","access":"yes","fee":"yes","name":"Teste OSM"}},
+                "tags":{"amenity":"parking","operator:type":"private","addr:street":"Rua OSM","addr:suburb":"Centro","addr:housenumber":"42","access":"yes","fee":"yes","name":"Teste OSM"}},
                 {"type":"node","id":42,"lat":0,"lon":0,
-                "tags":{"amenity":"parking","operator:type":"private","access":"yes"}},
+                "tags":{"amenity":"parking","operator:type":"private","addr:street":"Rua OSM","addr:suburb":"Centro","addr:housenumber":"42","access":"yes"}},
                 {"type":"relation","id":42,"center":{"lat":0,"lon":0},"tags":{"amenity":"parking"}}]}
                 """);
-        HttpServer servidor = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        servidor.createContext("/", troca -> {
-            byte[] dados = corpo.get().getBytes(StandardCharsets.UTF_8);
-            troca.sendResponseHeaders(200, dados.length);
-            try (var saida = troca.getResponseBody()) { saida.write(dados); }
-        });
-        servidor.start();
-        try {
-            var importar = new ImportadorOsm(sincronizacao, "-23.57,-46.66,-23.54,-46.63", 5,
-                    URI.create("http://127.0.0.1:" + servidor.getAddress().getPort()));
-            importar.run();
+        Path arquivo = temporario.resolve("estacionamentos.json");
+        Files.writeString(arquivo, corpo.get());
+        var importar = new ImportadorOsm(sincronizacao, "-23.57,-46.66,-23.54,-46.63", 5,
+                URI.create("https://overpass-api.de/api/interpreter"));
+        importar.run("--osm-arquivo=" + arquivo);
             long id = banco.queryForObject("SELECT id_estacionamento FROM tb_estacionamento WHERE ds_id_osm = 'way/42'", Long.class);
-            String favorito = "/favoritos/" + cliente.post("/favoritos", Map.of("idEstacionamento", id), 201).get("id").asLong();
-            corpo.set(corpo.get().replace("Teste OSM", "Nome atualizado"));
-            Path arquivo = temporario.resolve("estacionamentos.json");
-            Files.writeString(arquivo, corpo.get());
-            importar.run("--osm-arquivo=" + arquivo);
-            var atualizado = cliente.get("/estacionamentos/" + id, 200);
-            assertEquals("Nome atualizado", atualizado.get("nome").asString());
-            assertEquals("https://www.openstreetmap.org/way/42", atualizado.get("urlOsm").asString());
-            var proximos = cliente.get("/estacionamentos/proximos?latitude=0&longitude=0&raioKm=0.01&tipo=PRIVADO", 200);
-            assertEquals(2, proximos.size());
-            assertTrue(proximos.get(0).get("preco").isNull());
-            cliente.delete("/estacionamentos/" + id, 403);
-            cliente.get(favorito, 200);
-            cliente.delete(favorito, 204);
-            assertEquals(2, banco.queryForObject("SELECT COUNT(*) FROM tb_estacionamento WHERE ds_id_osm IS NOT NULL", Integer.class));
-        } finally {
-            servidor.stop(0);
-        }
+        String favorito = "/favoritos/" + cliente.post("/favoritos", Map.of("idEstacionamento", id), 201).get("id").asLong();
+        corpo.set(corpo.get().replace("Teste OSM", "Nome atualizado"));
+
+        Files.writeString(arquivo, corpo.get());
+        importar.run("--osm-arquivo=" + arquivo);
+        var atualizado = cliente.get("/estacionamentos/" + id, 200);
+        assertEquals("Nome atualizado", atualizado.get("nome").asString());
+        assertEquals("42", atualizado.get("numero").asString());
+        var proximos = cliente.get("/estacionamentos?rua=Rua%20OSM", 200);
+        assertEquals(2, proximos.size());
+        assertTrue(proximos.get(0).get("primeiraHora").isNull());
+        cliente.delete("/estacionamentos/" + id, 403);
+        cliente.get(favorito, 200);
+        cliente.delete(favorito, 204);
+        assertEquals(2, banco.queryForObject("SELECT COUNT(*) FROM tb_estacionamento WHERE ds_id_osm IS NOT NULL", Integer.class));
     }
 }

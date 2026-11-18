@@ -1,6 +1,6 @@
 package br.com.fiap.vagai.controller;
 
-import br.com.fiap.vagai.config.Sessao;
+import br.com.fiap.vagai.config.Autenticacao;
 import br.com.fiap.vagai.dao.*;
 import br.com.fiap.vagai.dto.*;
 import br.com.fiap.vagai.exception.*;
@@ -21,76 +21,76 @@ import java.util.List;
 public class AvaliacaoController {
     private final AvaliacaoDao dao;
     private final EstacionamentoDao locais;
-    private final Sessao sessao;
+    private final Autenticacao autenticacao;
     private final ModelMapper mapper;
 
-    public AvaliacaoController(AvaliacaoDao dao, EstacionamentoDao locais, Sessao sessao, ModelMapper mapper) {
+    public AvaliacaoController(AvaliacaoDao dao, EstacionamentoDao locais, Autenticacao autenticacao, ModelMapper mapper) {
         this.dao = dao;
         this.locais = locais;
-        this.sessao = sessao;
+        this.autenticacao = autenticacao;
         this.mapper = mapper;
     }
 
     @GetMapping("/avaliacoes")
-    public List<AvaliacaoSaida> listar() throws SQLException {
+    public List<AvaliacaoResponseDto> listar() throws SQLException {
         return dao.listar().stream().map(this::saida).toList();
     }
 
     @GetMapping("/avaliacoes/{id}")
-    public AvaliacaoSaida buscar(@PathVariable long id) throws SQLException {
+    public AvaliacaoResponseDto buscar(@PathVariable long id) throws SQLException {
         Avaliacao registro = dao.buscar(id);
         return saida(registro);
     }
 
     @PostMapping("/avaliacoes")
-    public ResponseEntity<AvaliacaoSaida> criar(@Valid @RequestBody AvaliacaoEntrada entrada,
+    public ResponseEntity<AvaliacaoResponseDto> cadastrar(@Valid @RequestBody AvaliacaoRequestDto dto,
                                           HttpServletRequest request) throws SQLException {
-        Usuario usuario = sessao.atual(request);
-        Avaliacao registro = mapper.map(entrada, Avaliacao.class);
+        Usuario usuario = autenticacao.atual(request);
+        Avaliacao registro = mapper.map(dto, Avaliacao.class);
         registro.setUsuario(usuario);
         registro.setData(LocalDateTime.now(ZoneOffset.UTC).withNano(0));
-        registro.setEstacionamento(locais.buscar(entrada.getIdEstacionamento()));
-        dao.inserir(registro);
+        registro.setEstacionamento(locais.buscar(dto.getIdEstacionamento()));
+        dao.cadastrar(registro);
         return ResponseEntity.created(URI.create("/avaliacoes/" + registro.getId())).body(saida(registro));
     }
 
     @PutMapping("/avaliacoes/{id}")
-    public AvaliacaoSaida atualizar(@PathVariable long id, @Valid @RequestBody AvaliacaoEntrada entrada,
+    public AvaliacaoResponseDto atualizar(@PathVariable long id, @Valid @RequestBody AvaliacaoRequestDto dto,
                               HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
+        autenticacao.atual(request);
         Avaliacao registro = dao.buscar(id);
-        sessao.exigirDono(request, registro.getIdUsuario());
-        if (!registro.getIdEstacionamento().equals(entrada.getIdEstacionamento()))
-            throw new Conflito("O vínculo com o estacionamento é permanente.");
-        mapper.map(entrada, registro);
+        autenticacao.exigirDono(request, registro.getIdUsuario());
+        if (!registro.getIdEstacionamento().equals(dto.getIdEstacionamento()))
+            throw new ConflitoException("O vínculo com o estacionamento é permanente.");
+        mapper.map(dto, registro);
         dao.atualizar(registro);
         return saida(dao.buscar(id));
     }
 
     @DeleteMapping("/avaliacoes/{id}")
-    public ResponseEntity<Void> excluir(@PathVariable long id, HttpServletRequest request) throws SQLException {
-        sessao.atual(request);
+    public ResponseEntity<Void> remover(@PathVariable long id, HttpServletRequest request) throws SQLException {
+        autenticacao.atual(request);
         Avaliacao registro = dao.buscar(id);
-        sessao.exigirDono(request, registro.getIdUsuario());
-        dao.excluir(id);
+        autenticacao.exigirDono(request, registro.getIdUsuario());
+        dao.remover(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/estacionamentos/{id}/avaliacoes")
-    public List<AvaliacaoSaida> doLocal(@PathVariable long id) throws SQLException {
+    public List<AvaliacaoResponseDto> doLocal(@PathVariable long id) throws SQLException {
         locais.buscar(id);
         return dao.doLocal(id).stream().map(this::saida).toList();
     }
 
     @PostMapping("/estacionamentos/{id}/avaliacoes")
-    public ResponseEntity<AvaliacaoSaida> criarNoLocal(@PathVariable long id,
-            @Valid @RequestBody AvaliacaoLocalEntrada dados, HttpServletRequest request) throws SQLException {
-        AvaliacaoEntrada entrada = mapper.map(dados, AvaliacaoEntrada.class);
-        entrada.setIdEstacionamento(id);
-        return criar(entrada, request);
+    public ResponseEntity<AvaliacaoResponseDto> cadastrarNoLocal(@PathVariable long id,
+            @Valid @RequestBody AvaliacaoLocalRequestDto dados, HttpServletRequest request) throws SQLException {
+        AvaliacaoRequestDto dto = mapper.map(dados, AvaliacaoRequestDto.class);
+        dto.setIdEstacionamento(id);
+        return cadastrar(dto, request);
     }
 
-    private AvaliacaoSaida saida(Avaliacao registro) {
-        return mapper.map(registro, AvaliacaoSaida.class);
+    private AvaliacaoResponseDto saida(Avaliacao registro) {
+        return mapper.map(registro, AvaliacaoResponseDto.class);
     }
 }

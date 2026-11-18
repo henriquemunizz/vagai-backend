@@ -1,12 +1,20 @@
 package br.com.fiap.vagai.model;
 
 public class Regra {
+    public boolean aplicaEm(int dia, int minuto) {
+        if (ativo != 1) return false;
+        if (inicio < fim) return dia == diaSemana && minuto >= inicio && minuto < fim;
+        int diaSeguinte = diaSemana == 7 ? 1 : diaSemana + 1;
+        return (dia == diaSemana && minuto >= inicio) || (dia == diaSeguinte && minuto < fim);
+    }
+
     private Long id;
     private Estacionamento estacionamento;
     private String descricao;
-    private String diaSemana;
-    private String inicio;
-    private String fim;
+    private Integer diaSemana;
+    private Integer inicio;
+    private Integer fim;
+    private String tipo;
     private Integer ativo;
 
     public Regra() {}
@@ -43,27 +51,27 @@ public class Regra {
         this.descricao = descricao;
     }
 
-    public String getDiaSemana() {
+    public Integer getDiaSemana() {
         return diaSemana;
     }
 
-    public void setDiaSemana(String diaSemana) {
+    public void setDiaSemana(Integer diaSemana) {
         this.diaSemana = diaSemana;
     }
 
-    public String getInicio() {
+    public Integer getInicio() {
         return inicio;
     }
 
-    public void setInicio(String inicio) {
+    public void setInicio(Integer inicio) {
         this.inicio = inicio;
     }
 
-    public String getFim() {
+    public Integer getFim() {
         return fim;
     }
 
-    public void setFim(String fim) {
+    public void setFim(Integer fim) {
         this.fim = fim;
     }
 
@@ -73,5 +81,13 @@ public class Regra {
 
     public void setAtivo(Integer ativo) {
         this.ativo = ativo;
+    }
+
+    public String getTipo() {
+        return tipo;
+    }
+
+    public void setTipo(String tipo) {
+        this.tipo = tipo;
     }
 }

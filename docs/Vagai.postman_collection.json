@@ -107,7 +107,7 @@
         "url": "{{baseUrl}}/estacionamentos",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"nome\": \"Trecho demonstrativo\",\n  \"descricao\": \"Dados de teste da apresentação\",\n  \"tipo\": \"ROTATIVO\",\n  \"latitude\": -23.5567,\n  \"longitude\": -46.6532,\n  \"endereco\": \"Trecho fictício\",\n  \"preco\": null,\n  \"horario\": null,\n  \"ativo\": 1\n}"
+          "raw": "{\n  \"nome\": \"Estacionamento de teste\",\n  \"descricao\": \"Exemplo fictício\",\n  \"tipo\": \"ROTATIVO\",\n  \"rua\": \"Rua das Flores\",\n  \"bairro\": \"Centro\",\n  \"numero\": \"120A\",\n  \"primeiraHora\": null,\n  \"demaisHoras\": null,\n  \"ativo\": 1\n}"
         }
       },
       "event": [
@@ -288,7 +288,7 @@
         "url": "{{baseUrl}}/regras",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idEstacionamento\": {{localId}},\n  \"descricao\": \"Limite de duas horas (exemplo)\",\n  \"diaSemana\": \"Segunda a sexta\",\n  \"inicio\": \"08:00\",\n  \"fim\": \"18:00\",\n  \"ativo\": 1\n}"
+          "raw": "{\n  \"idEstacionamento\": {{localId}},\n  \"descricao\": \"Permitido durante o atendimento\",\n  \"diaSemana\": 1,\n  \"inicio\": 480,\n  \"fim\": 1080,\n  \"tipo\": \"PERMITIDO\",\n  \"ativo\": 1\n}"
         }
       },
       "event": [
@@ -336,7 +336,7 @@
         "url": "{{baseUrl}}/regras/{{RegraId}}",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"idEstacionamento\": {{localId}},\n  \"descricao\": \"Limite de duas horas (exemplo)\",\n  \"diaSemana\": \"Segunda a sexta\",\n  \"inicio\": \"08:00\",\n  \"fim\": \"18:00\",\n  \"ativo\": 1\n}"
+          "raw": "{\n  \"idEstacionamento\": {{localId}},\n  \"descricao\": \"Permitido durante o atendimento\",\n  \"diaSemana\": 1,\n  \"inicio\": 480,\n  \"fim\": 1080,\n  \"tipo\": \"PERMITIDO\",\n  \"ativo\": 1\n}"
         }
       },
       "event": [
@@ -428,11 +428,11 @@
       ]
     },
     {
-      "name": "Buscar no mapa",
+      "name": "Pesquisar estacionamentos por rua",
       "request": {
         "method": "GET",
         "header": [],
-        "url": "{{baseUrl}}/estacionamentos/proximos?latitude=-23.5567&longitude=-46.6532&raioKm=2"
+        "url": "{{baseUrl}}/estacionamentos?rua=Rua%20das%20Flores"
       },
       "event": [
         {

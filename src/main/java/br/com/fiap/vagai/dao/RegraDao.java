@@ -2,66 +2,118 @@ package br.com.fiap.vagai.dao;
 
 import br.com.fiap.vagai.model.Regra;
 import org.springframework.stereotype.Repository;
-import javax.sql.DataSource;
+import br.com.fiap.vagai.factory.ConnectionFactory;
+import br.com.fiap.vagai.exception.EntidadeNaoEncontradaException;
+import java.util.ArrayList;
 import java.sql.*;
 import java.util.List;
 
 @Repository
-public class RegraDao extends JdbcDao<Regra> {
-    public RegraDao(DataSource origem) {
-        super(origem);
+public class RegraDao {
+    private final ConnectionFactory factory;
+
+    public RegraDao(ConnectionFactory factory) {
+        this.factory = factory;
     }
 
-    @Override
-    protected Regra ler(ResultSet linha) throws SQLException {
+    private Regra getRegra(ResultSet linha) throws SQLException {
         Regra registro = new Regra();
         registro.setId(linha.getLong("id_regra"));
         registro.setIdEstacionamento(linha.getLong("id_estacionamento"));
         registro.setDescricao(linha.getString("ds_regra"));
-        registro.setDiaSemana(linha.getString("ds_dia_semana"));
-        registro.setInicio(linha.getString("hr_inicio"));
-        registro.setFim(linha.getString("hr_fim"));
+        registro.setDiaSemana(linha.getInt("nr_dia_semana"));
+        registro.setInicio(linha.getInt("nr_inicio"));
+        registro.setFim(linha.getInt("nr_fim"));
         registro.setAtivo(linha.getInt("st_ativo"));
+        registro.setTipo(linha.getString("tp_regra"));
         return registro;
     }
 
     public Regra buscar(long id) throws SQLException {
-        return primeiro("SELECT * FROM tb_regra_estacionamento WHERE id_regra = ?", id);
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT * FROM tb_regra_estacionamento WHERE id_regra = ?")) {
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) throw new EntidadeNaoEncontradaException();
+                return getRegra(rs);
+            }
+        }
     }
 
     public List<Regra> listar() throws SQLException {
-        return consultar("SELECT * FROM tb_regra_estacionamento ORDER BY id_regra");
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT * FROM tb_regra_estacionamento ORDER BY id_regra")) {
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<Regra> lista = new ArrayList<>();
+                while (rs.next()) lista.add(getRegra(rs));
+                return lista;
+            }
+        }
     }
 
     public List<Regra> doLocal(long id) throws SQLException {
-        return consultar("SELECT * FROM tb_regra_estacionamento WHERE id_estacionamento = ? ORDER BY id_regra DESC", id);
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT * FROM tb_regra_estacionamento WHERE id_estacionamento = ? ORDER BY id_regra DESC")) {
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<Regra> lista = new ArrayList<>();
+                while (rs.next()) lista.add(getRegra(rs));
+                return lista;
+            }
+        }
     }
 
-    public void inserir(Regra registro) throws SQLException {
-        registro.setId(proximoId("SELECT sq_tb_regra_estacionamento.NEXTVAL FROM dual"));
-        executar("""
-                INSERT INTO tb_regra_estacionamento (id_regra, id_estacionamento, ds_regra, ds_dia_semana,
-                    hr_inicio, hr_fim, st_ativo)
-                VALUES (?, ?, ?, ?,
+    public void cadastrar(Regra registro) throws SQLException {
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("SELECT sq_tb_regra_estacionamento.NEXTVAL FROM dual");
+             ResultSet rs = stmt.executeQuery()) {
+            rs.next();
+            registro.setId(rs.getLong(1));
+        }
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("""
+                INSERT INTO tb_regra_estacionamento (id_regra, id_estacionamento, ds_regra, nr_dia_semana,
+                    nr_inicio, nr_fim, tp_regra, st_ativo)
+                VALUES (?, ?, ?, ?, ?,
                     ?, ?, ?)
-                """,
-                registro.getId(), registro.getIdEstacionamento(), registro.getDescricao(), registro.getDiaSemana(), 
-                registro.getInicio(), registro.getFim(), registro.getAtivo());
+                """)) {
+            stmt.setLong(1, registro.getId());
+            stmt.setLong(2, registro.getIdEstacionamento());
+            stmt.setString(3, registro.getDescricao());
+            stmt.setInt(4, registro.getDiaSemana());
+            stmt.setInt(5, registro.getInicio());
+            stmt.setInt(6, registro.getFim());
+            stmt.setString(7, registro.getTipo());
+            stmt.setInt(8, registro.getAtivo());
+            stmt.executeUpdate();
+        }
     }
 
     public void atualizar(Regra registro) throws SQLException {
-        executar("""
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("""
                 UPDATE tb_regra_estacionamento
-                SET ds_regra = ?, ds_dia_semana = ?, hr_inicio = ?, hr_fim = ?,
+                SET ds_regra = ?, nr_dia_semana = ?, nr_inicio = ?, nr_fim = ?, tp_regra = ?,
                     st_ativo = ?
                 WHERE id_regra = ?
-                """,
-                registro.getDescricao(), registro.getDiaSemana(), registro.getInicio(), registro.getFim(), 
-                registro.getAtivo(), registro.getId());
+                """)) {
+            stmt.setString(1, registro.getDescricao());
+            stmt.setInt(2, registro.getDiaSemana());
+            stmt.setInt(3, registro.getInicio());
+            stmt.setInt(4, registro.getFim());
+            stmt.setString(5, registro.getTipo());
+            stmt.setInt(6, registro.getAtivo());
+            stmt.setLong(7, registro.getId());
+            if (stmt.executeUpdate() == 0) throw new EntidadeNaoEncontradaException();
+        }
     }
 
-    public void excluir(long id) throws SQLException {
-        if (executar("DELETE FROM tb_regra_estacionamento WHERE id_regra = ?", id) == 0)
-            throw new br.com.fiap.vagai.exception.NaoEncontrado();
+    public void remover(long id) throws SQLException {
+        try (Connection conexao = factory.getConnection();
+             PreparedStatement stmt = conexao.prepareStatement("DELETE FROM tb_regra_estacionamento WHERE id_regra = ?")) {
+            stmt.setLong(1, id);
+            if (stmt.executeUpdate() == 0) throw new EntidadeNaoEncontradaException();
+        }
     }
 }

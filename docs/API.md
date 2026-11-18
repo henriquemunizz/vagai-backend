@@ -21,7 +21,7 @@ POST cria (201, Location relativa). GET e PUT devolvem 200, DELETE devolve 204 s
 
 ## Corpos por recurso
 
-Envie apenas os campos de entrada. O servidor define proprietário, origem, datas e identificadores. O preço é opcional e deve acompanhar uma unidade tarifária explícita na descrição quando conhecida. Um valor nulo indica preço desconhecido.
+Envie apenas os campos de entrada. O servidor define proprietário, origem, datas e identificadores. As tarifas são em reais. No cadastro manual de PRIVADO, informe primeiraHora e também demaisHoras. GRATUITO aceita somente zero ou null nas tarifas.
 
 ### Usuario
 
@@ -50,14 +50,14 @@ Entrada para `POST /estacionamentos` e `PUT /estacionamentos/{id}`.
 
 ```json
 {
-  "nome": "Trecho demonstrativo",
-  "descricao": "Dados de teste da apresentação",
-  "tipo": "ROTATIVO",
-  "latitude": -23.5567,
-  "longitude": -46.6532,
-  "endereco": "Trecho fictício",
-  "preco": null,
-  "horario": null,
+  "nome": "Estacionamento de teste",
+  "descricao": "Exemplo fictício",
+  "tipo": "PRIVADO",
+  "rua": "Rua das Flores",
+  "bairro": "Centro",
+  "numero": "120A",
+  "primeiraHora": 18,
+  "demaisHoras": 8,
   "ativo": 1
 }
 ```
@@ -67,20 +67,19 @@ Resposta de item.
 ```json
 {
   "id": 17,
-  "nome": "Trecho demonstrativo",
-  "descricao": "Dados de teste da apresentação",
-  "tipo": "ROTATIVO",
-  "latitude": -23.5567,
-  "longitude": -46.6532,
-  "endereco": "Trecho fictício",
-  "preco": null,
-  "horario": null,
-  "ativo": 1,
   "idUsuarioCriador": 1,
-  "fonte": "COLABORATIVA",
+  "fonte": "USUARIO",
   "idOsm": null,
-  "urlOsm": null,
-  "verificacao": null
+  "verificacao": null,
+  "nome": "Estacionamento de teste",
+  "descricao": "Exemplo fictício",
+  "tipo": "PRIVADO",
+  "rua": "Rua das Flores",
+  "bairro": "Centro",
+  "numero": "120A",
+  "primeiraHora": 18,
+  "demaisHoras": 8,
+  "ativo": 1
 }
 ```
 
@@ -142,11 +141,12 @@ Entrada para `POST /regras` e `PUT /regras/{id}`.
 ```json
 {
   "idEstacionamento": 17,
-  "descricao": "Limite de duas horas (exemplo)",
-  "diaSemana": "Segunda a sexta",
-  "inicio": "08:00",
-  "fim": "18:00",
-  "ativo": 1
+  "descricao": "Permitido durante o atendimento",
+  "diaSemana": 1,
+  "inicio": 480,
+  "fim": 1080,
+  "ativo": 1,
+  "tipo": "PERMITIDO"
 }
 ```
 
@@ -156,11 +156,12 @@ Resposta de item.
 {
   "id": 1,
   "idEstacionamento": 17,
-  "descricao": "Limite de duas horas (exemplo)",
-  "diaSemana": "Segunda a sexta",
-  "inicio": "08:00",
-  "fim": "18:00",
-  "ativo": 1
+  "descricao": "Permitido durante o atendimento",
+  "diaSemana": 1,
+  "inicio": 480,
+  "fim": 1080,
+  "ativo": 1,
+  "tipo": "PERMITIDO"
 }
 ```
 
@@ -196,26 +197,33 @@ Resposta de item.
 | POST | `/estacionamentos/{id}/avaliacoes` | Mesmo corpo do POST principal, omitindo idEstacionamento. A URL identifica o local. |
 | GET | `/usuarios/me/favoritos` | Lista de favoritos da sessão. Use idEstacionamento em GET /estacionamentos/{id} para os detalhes. |
 
-## Busca no mapa
+## Lista por rua
 
-`GET /estacionamentos/proximos?latitude=-23.5567&longitude=-46.6532&raioKm=2&tipo=ROTATIVO`
+GET /estacionamentos?rua=Rua%20das%20Flores
 
-latitude, longitude e raioKm são obrigatórios. O tipo é opcional. Cada item contém todos os campos da saída de estacionamento e os quatro campos adicionais abaixo. A lista contém apenas locais ativos em ordem crescente de distância em linha reta.
+GET /estacionamentos?rua=Flores&bairro=Centro
 
-```json
-{
-  "distanciaKm": 0.134,
-  "mediaAvaliacoes": 4,
-  "regras": [],
-  "ultimoReporteRecente": null
-}
-```
+A resposta é uma lista de objetos no formato de EstacionamentoResponseDto. Cada item tem nome, rua, bairro, numero, tipo, as duas tarifas, autoria, origem e estado. Os parâmetros rua e bairro são opcionais. A pesquisa encontra trechos do nome, ignora maiúsculas e minúsculas e considera os acentos. Sem filtros, lista todos os locais ativos. A ordem é rua, bairro, número como texto e ID. A pesquisa inclui os três tipos. Resultado sem correspondência devolve 200 com [].
 
-A média é null quando faltam notas. regras contém somente regras ativas. ultimoReporteRecente contém a saída completa do reporte mais recente dos últimos dez minutos, ou null. O histórico permanece disponível na rota aninhada com atual calculado no momento da consulta. Ao manter a tela aberta, o frontend deve descartar o indicador ao atingir data + 10 minutos.
+numero aceita valores como "120", "120A" ou "s/n". Para um trecho gratuito ou rotativo, informe o número de referência da rua. O cadastro identifica um local ou trecho. Campos de endereço são obrigatórios no POST e no PUT.
+
+primeiraHora é o valor total da primeira hora. demaisHoras é o valor de cada hora adicional. null indica tarifa desconhecida na origem do registro. Uma importação OSM pode ter tarifas desconhecidas. A API expõe as tarifas cadastradas. Regras de arredondamento ou cobrança de frações precisam constar na descrição.
+
+Consulte avaliações e reportes nas rotas aninhadas do local. Reportes com mais de dez minutos têm atual=false. Avaliação é única por usuário e local. Use PUT para mudar sua nota.
+
+## Regras por dia e horário
+
+GET /estacionamentos/17/regras?diaSemana=2&minuto=1260
+
+Dia vai de 1 (segunda) a 7 (domingo). inicio, fim e minuto representam minutos desde 00h00, entre 0 e 1439. Por exemplo, 20h corresponde a 1200 e 6h a 360. diaSemana e minuto devem ser enviados juntos. Sem esses parâmetros, a rota devolve o histórico completo de regras do local.
+
+Um intervalo de segunda com inicio=1200 e fim=360 se aplica de segunda às 20h até terça às 6h. O início é incluído e o fim excluído. Valores iguais representam 24 horas desde o início informado. Cadastre uma linha por dia em que o intervalo começa. Múltiplos intervalos no mesmo dia são permitidos.
+
+A consulta com dia e minuto retorna somente regras ativas aplicáveis naquele instante, incluindo as que começaram no dia anterior. Cada regra traz PERMITIDO ou PROIBIDO. Se houver regras conflitantes, PROIBIDO deve prevalecer na apresentação. Uma lista vazia significa informação ausente. Horários são locais ao estacionamento.
 
 ## Validações e erros
 
-Nome do usuário até 40 caracteres, único e sensível a maiúsculas. Senha de 8 a 255 caracteres. Latitude entre -90 e 90, longitude entre -180 e 180, até sete casas decimais. Raio positivo e finito. Tipos de local GRATUITO, ROTATIVO ou PRIVADO. Tipos de reporte VAGA_ENCONTRADA ou SEM_VAGA. Nota inteira de 1 a 5. Estados inteiros 0 ou 1. Horas em HH:mm.
+Nome do usuário até 40 caracteres, único e sensível a maiúsculas. Senha de 8 a 255 caracteres. Tipos de local GRATUITO, ROTATIVO ou PRIVADO. Tipos de reporte VAGA_ENCONTRADA ou SEM_VAGA. Nota inteira de 1 a 5. Estados inteiros 0 ou 1. Horários em minutos de 0 a 1439 e dia da semana de 1 a 7.
 
 ```json
 {
@@ -226,12 +234,11 @@ Nome do usuário até 40 caracteres, único e sensível a maiúsculas. Senha de 
 
 | Status | Situação |
 |---|---|
-| 400 | Campo obrigatório, tipo, nota, coordenada ou JSON inválido. |
+| 400 | Campo obrigatório, tipo, nota, horário ou JSON inválido. |
 | 401 | Login inválido ou sessão ausente/expirada. |
 | 403 | Recurso de outro usuário ou local importado/verificado. |
 | 404 | ID, local aninhado ou rota inexistente. |
 | 405 | Método incompatível com a rota. |
-| 409 | Nome/favorito duplicado, vínculos impedindo exclusão, reporte privado/inativo ou tentativa de mudar vínculo permanente. |
+| 409 | Nome, favorito ou avaliação duplicada, vínculos impedindo exclusão, reporte privado/inativo ou tentativa de mudar vínculo permanente. |
 | 500 | Falha interna, com detalhes técnicos apenas no servidor. |
 
-Nos locais importados, urlOsm aponta para o elemento original no OpenStreetMap. O campo também está disponível em cada resultado da busca por proximidade. Nos cadastros manuais ele vale null.

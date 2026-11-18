@@ -1,124 +1,111 @@
 # Vagaí · Backend Java
 
-**Global Solution FIAP 2026/2 · CitizenTech.** API para motoristas pesquisarem locais de estacionamento perto do destino, consultarem restrições e compartilharem relatos, avaliações e favoritos. Cada marcador representa um local. Um relato recente indica o que outro motorista observou naquele instante.
+Global Solution FIAP 2026/2 · CitizenTech. A primeira versão permite pesquisar estacionamentos por rua e apresentar uma lista com nome, bairro, número, tipo e tarifas. Os tipos são GRATUITO, ROTATIVO e PRIVADO. Motoristas autenticados cadastram locais, salvam favoritos, avaliam e registram relatos.
 
 ## Executar no IntelliJ
 
-1. Instale o JDK 21 e abra o pom.xml como projeto Maven. Selecione JDK 21 como Project SDK. O Maven Wrapper acompanha o projeto.
-2. Para testar imediatamente, rode ApiIntegracaoTest pela IDE ou execute `./mvnw verify` na raiz. No Windows, use `.\mvnw.cmd verify`. A suíte sobe Tomcat em porta aleatória e H2 descartável em modo Oracle. A primeira execução baixa dependências.
-3. Para usar o Oracle da FIAP, abra uma conexão com o esquema reservado ao Vagaí no SQL Developer. Confirme o serviço, a conta, a conectividade e os privilégios CREATE TABLE e CREATE SEQUENCE. O GAIA também usa TB_USUARIO. Use um esquema próprio e vazio para evitar colisão.
-4. Execute como script, na ordem, [estrutura](sql/01_estrutura.sql), [dados de teste opcionais](sql/02_dados_teste.sql) e [consultas](sql/03_consultas.sql). A carga é para uma execução em base vazia. São doze inserts por tabela, um UPDATE e um DELETE com WHERE. Restam 71 linhas. Os dados são fictícios e os hashes das contas de exemplo correspondem a valores aleatórios descartados. Cadastre uma conta para fazer login.
-5. Em **Run → Edit Configurations**, selecione VagaiApplication e configure as variáveis abaixo. Inicie a classe ou use `.\mvnw.cmd spring-boot:run`. Verifique `GET http://localhost:8080/estacionamentos` no Postman. Uma base vazia devolve uma lista vazia.
+1. Abra o pom.xml como projeto Maven e selecione JDK 21.
+2. Execute `./mvnw verify`, ou `.\mvnw.cmd verify` no Windows. Os testes usam Spring MVC, sessões e DAOs reais com H2 em modo Oracle.
+3. Abra um esquema Oracle reservado ao Vagaí no SQL Developer. Execute [01_estrutura.sql](sql/01_estrutura.sql), a carga opcional [02_dados_teste.sql](sql/02_dados_teste.sql) e [03_consultas.sql](sql/03_consultas.sql).
+4. Configure DB_URL, DB_USER e DB_PASSWORD nas variáveis de ambiente da execução de VagaiApplication.
+5. Inicie VagaiApplication ou execute `.\mvnw.cmd spring-boot:run`. Consulte `GET http://localhost:8080/estacionamentos?rua=Rua%20de%20Teste`.
 
-| Variável | Valor ou finalidade |
+A carga contém 72 inserts fictícios, um UPDATE e um DELETE com WHERE. Restam 71 registros. Cadastre sua conta pela API para fazer login. Os hashes das contas da carga correspondem a valores aleatórios descartados. A estrutura inicial destina-se a esquema vazio.
+
+## Configuração
+
+| Variável | Uso |
 |---|---|
-| DB_URL | URL fornecida pela FIAP, em formato JDBC Thin, por exemplo `jdbc:oracle:thin:@//HOST:1521/SERVICO`. Para SID, use o formato orientado pela instituição. |
-| DB_USER, DB_PASSWORD | Credenciais individuais do esquema, configuradas no ambiente de execução. |
-| PORT | Porta HTTP, padrão 8080. No Render, utilize a porta do serviço. |
-| FRONTEND_ORIGIN | Origem exata do React, sem barra final. Padrão local `http://localhost:5173`. |
-| COOKIE_SECURE, COOKIE_SAME_SITE | Local HTTP: false e lax. Produção HTTPS entre sites diferentes: true e none. |
-| OSM_BBOX | Sul,oeste,norte,leste em graus decimais. Padrão: -23.57,-46.66,-23.54,-46.63. |
-| OSM_TIMEOUT, OSM_URL | Timeout de consulta em segundos (padrão 30) e URL do intérprete Overpass. |
+| DB_URL | JDBC Thin fornecido pela FIAP, como jdbc:oracle:thin:@//HOST:1521/SERVICO ou no formato SID indicado pela instituição. |
+| DB_USER e DB_PASSWORD | Conta e senha do esquema, configuradas no ambiente. |
+| PORT | Porta HTTP, padrão 8080. |
+| FRONTEND_ORIGIN | Origem exata do frontend, padrão http://localhost:5173, sem barra final. |
+| COOKIE_SECURE e COOKIE_SAME_SITE | HTTP local usa false e lax. HTTPS entre sites diferentes usa true e none. |
+| OSM_BBOX | Região da importação interna, sul,oeste,norte,leste. Padrão -23.57,-46.66,-23.54,-46.63. |
+| OSM_TIMEOUT e OSM_URL | Timeout da consulta, padrão 30 segundos, e URL do intérprete Overpass. |
 
-## Código e banco
+## Cadastro e lista
 
-Java 21, Spring Boot 4.1.1, Maven, JDBC, Hikari DataSource, ojdbc17, Bean Validation e ModelMapper. A aplicação mantém a sessão no servidor por até 30 minutos de inatividade. Apenas o cookie HttpOnly identifica a sessão no cliente. O login troca a sessão e a troca de senha invalida o acesso das demais sessões na próxima consulta autenticada.
+`GET /estacionamentos?rua=Flores&bairro=Centro` retorna os três tipos ativos que correspondem ao filtro. O bairro é opcional. A pesquisa ignora maiúsculas e minúsculas, considera acentos e aceita parte do nome. Sem filtros, lista todos os locais ativos. A ordem é rua, bairro, número como texto e ID.
+
+```json
+{
+  "nome": "Garagem Exemplo",
+  "tipo": "PRIVADO",
+  "rua": "Rua das Flores",
+  "bairro": "Centro",
+  "numero": "120A",
+  "primeiraHora": 18,
+  "demaisHoras": 8,
+  "ativo": 1
+}
+```
+
+Envie esse corpo em POST /estacionamentos ou PUT /estacionamentos/{id}, com sessão autenticada. Rua, bairro e número são obrigatórios. numero aceita 120A e s/n. Em trechos gratuitos ou rotativos, informe o número de referência.
+
+Tarifas em reais. primeiraHora indica o total da primeira hora. demaisHoras indica o valor de cada hora adicional. O cadastro manual privado exige a tarifa da primeira hora e o valor das demais horas. GRATUITO aceita somente zero ou null. Tarifas importadas podem ser desconhecidas. Eventuais cobranças de frações devem constar na descrição.
+
+[Contrato JSON completo](docs/API.md) · [Coleção Postman](docs/Vagai.postman_collection.json)
+
+## Banco e horários
+
+São seis tabelas, seis sequences e oito FKs. As sequences seguem a exigência original e a compatibilidade com o Oracle disponibilizado à equipe. Avaliações e favoritos têm UNIQUE (id_usuario, id_estacionamento). Cada usuário mantém uma nota por local, editável com PUT.
+
+TB_USUARIO usa ds_senha_hash com PBKDF2 e salt individual. As datas de cadastro, reporte, avaliação e favorito têm DEFAULT SYSDATE. A API grava UTC. Inserções manuais que usam o default devem considerar o fuso do Oracle. O índice de reportes usa (id_estacionamento, dt_reporte). Reportes perdem validade informativa após dez minutos.
+
+TB_ESTACIONAMENTO concentra o endereço e as duas tarifas. ds_fonte aceita OSM ou USUARIO. st_ativo é padronizado nas tabelas de locais e regras, com 1 para ativo e 0 para inativo. A exclusão de usuário deixa o criador do local nulo. Reportes, avaliações e favoritos bloqueiam a exclusão da conta com 409. Todas as dependências de um estacionamento bloqueiam sua exclusão. Um local sem criador fica consultável e sem usuário autorizado a editá-lo.
+
+TB_REGRA_ESTACIONAMENTO concentra horários e restrições. diaSemana vai de 1 (segunda) a 7 (domingo). inicio e fim são minutos desde 00h00, entre 0 e 1439. Segunda das 20h a terça às 6h usa diaSemana=1, inicio=1200, fim=360. Início incluído, fim excluído. Valores iguais representam 24 horas desde o início.
+
+Cadastre uma linha por dia de início. `GET /estacionamentos/{id}/regras?diaSemana=2&minuto=1260` retorna regras ativas aplicáveis a terça às 21h, incluindo intervalos iniciados no dia anterior. Cada regra indica PERMITIDO ou PROIBIDO. Lista vazia significa ausência de informação. Em conflito, a apresentação deve priorizar PROIBIDO. Horários são locais ao estacionamento.
+
+## Arquitetura e endpoints
+
+Java 21, Spring Boot 4.1.1, Maven, JDBC, DataSource, PreparedStatement, Bean Validation e ModelMapper. Models e DTOs têm atributos privados e métodos de acesso. DTOs de entrada usam RequestDto e os de saída ResponseDto, seguindo a referência GAIA. ErroResponseDto padroniza o corpo de erros. Relacionamentos no model usam objetos com identidade, e o JSON usa IDs.
 
 | Pacote | Responsabilidade |
 |---|---|
-| model | Usuario, Estacionamento, Reporte, Avaliacao, Regra e Favorito têm atributos privados, construtor vazio e getters/setters. Os vínculos usam referências a Usuario e Estacionamento. Ao ler uma FK, o DAO monta a referência pelo ID. Reporte calcula sua validade informativa. |
-| dto | DTOs com propriedades acessadas pelo ModelMapper e validação na entrada. O JSON dos vínculos usa IDs. Nenhuma saída contém senha ou hash. |
-| controller | Rotas, validação, autorização por sessão, conversão com ModelMapper e status HTTP. |
-| dao | Um DAO por entidade. JdbcDao abre e fecha recursos JDBC e associa os parâmetros aos PreparedStatements. |
-| service | BuscaGeografica calcula Haversine. Senhas deriva hashes PBKDF2-HMAC-SHA256 com salt individual e 600 mil iterações. ImportadorOsm consulta a fonte e SincronizacaoOsm persiste cada elemento. |
-| config | Sessao identifica o motorista. Configuracao registra CORS e ModelMapper. |
-| exception, handler | Exceções de domínio e respostas de erro JSON. |
+| model e dto | Entidades e contratos. Regra avalia intervalos e Reporte calcula validade. |
+| dao | Um DAO independente por entidade, ConnectionFactory, PreparedStatement e fechamento de recursos. |
+| controller | CRUD, autorização, conversão e status HTTP. |
+| config | Autenticacao, Senha, CorsFilter e ModelMapperConfig, cada um em seu arquivo. |
+| bo | UsuarioBo para cadastro, login e atualização; EstacionamentoOsmBo para persistir importações. |
+| service | ImportadorOsm consulta a integração externa. |
+| factory | ConnectionFactory obtém conexões e participa das transações. |
+| exception | Exceções com sufixo Exception, ApiExceptionHandler e tratamento de erros do servidor. |
 
-As seis tabelas têm PK e sequence. Oito FKs materializam os vínculos: criador do local, usuário/local do reporte, usuário/local da avaliação, local da regra e usuário/local do favorito. A chave única do par no favorito resolve o N:N. A FK impede apagar um local com vínculos, inclusive regras. Remova primeiro os registros que pertencem à sua conta. Um local com contribuição de outro usuário continuará protegido.
+POST /auth/cadastro, /auth/login e /auth/logout. GET /auth/me. Os seis recursos /usuarios, /estacionamentos, /reportes, /avaliacoes, /regras e /favoritos têm GET/POST na coleção e GET/PUT/DELETE em /{id}. GET /usuarios mostra a própria conta. Favoritos são restritos à sessão.
 
-## Endpoints e frontend
+GET/POST /estacionamentos/{id}/reportes e /avaliacoes. GET /estacionamentos/{id}/regras. GET /usuarios/me/favoritos.
 
-[Contrato completo, corpos JSON, saídas e erros](docs/API.md) · [Coleção de demonstração do Postman](docs/Vagai.postman_collection.json)
+## React e Postman
 
-| Caminhos | Operações |
-|---|---|
-| /auth/cadastro, /auth/login, /auth/logout | POST |
-| /auth/me, /usuarios/me/favoritos | GET |
-| /usuarios, /estacionamentos, /reportes, /avaliacoes, /regras, /favoritos | POST e GET na coleção. GET, PUT e DELETE em /{id}. |
-| /estacionamentos/{id}/reportes e /estacionamentos/{id}/avaliacoes | GET e POST |
-| /estacionamentos/{id}/regras, /estacionamentos/proximos | GET |
+No React, envie `credentials: "include"` no login e nas chamadas autenticadas. O cookie de sessão é HttpOnly. O login renova a sessão. A origem do navegador precisa corresponder a FRONTEND_ORIGIN.
 
-No Postman, importe a coleção, defina nome e senha nas variáveis locais e mantenha o cookie jar habilitado. Use um nome novo a cada execução completa. O Runner captura os IDs retornados. A sequência cria vínculos, demonstra 400 e 409, remove os registros da demonstração e verifica 404. O roteiro mantém a conta para novos logins. GET /usuarios lista somente a própria conta.
+Importe a coleção no Postman, preencha baseUrl, nome e senha e mantenha o cookie jar habilitado. O Runner captura IDs e demonstra CRUD, conflitos, 400 e 404. Use um nome novo para cada execução completa.
 
-No React, envie credenciais inclusive no login. A mesma origem configurada em FRONTEND_ORIGIN precisa ser usada pelo navegador. Em desenvolvimento, mantenha localhost em ambas as aplicações. Com bloqueio de cookies de terceiros, hospede frontend e API sob o mesmo site.
+## OpenStreetMap
 
-```typescript
-await fetch(api + "/auth/login", {
-  method: "POST",
-  credentials: "include",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ nome, senha })
-})
-const perfil = await fetch(api + "/auth/me", { credentials: "include" })
-```
+A importação é uma rotina interna que preenche a lista. Rode `./mvnw package` e `java -jar target/vagai-1.0.0.jar --spring.profiles.active=importar`. A rotina aceita `--osm-arquivo=estacionamentos.json` para ler uma resposta Overpass com a chave elements.
 
-## OpenStreetMap e busca
+A consulta usa amenity=parking em uma região delimitada. A classificação inicial exige operator:type=private, access=yes, addr:street, addr:suburb e addr:housenumber. Locais sem essas informações são ignorados. As tags access, fee, parking, capacity e charge ficam na descrição. Tarifas específicas ficam nulas quando faltam dados. Horários estruturados são cadastrados na tabela de regras por fontes confiáveis.
 
-A busca normal lê locais ativos do Oracle, filtra por raio em quilômetros e tipo e ordena pela distância em linha reta. Para cada resultado, reúne regras ativas, média das notas e último reporte dos dez minutos anteriores. O protótipo calcula as distâncias em memória e consulta os vínculos dos locais selecionados. Isso atende a uma base acadêmica pequena.
-
-Para importar, configure as variáveis do Oracle e execute na raiz:
-
-```shell
-./mvnw package
-java -jar target/vagai-1.0.0.jar --spring.profiles.active=importar
-```
-
-Se já tiver a resposta da Overpass em JSON, a mesma rotina pode ler o arquivo local. No [Overpass Turbo](https://overpass-turbo.eu/), execute a consulta abaixo e use **Export → Data → raw data directly from Overpass API**. Salve o resultado como `estacionamentos.json` (formato com `elements`). Na raiz do projeto, execute:
-
-```text
-[out:json][timeout:30];
-nwr["amenity"="parking"](-23.57,-46.66,-23.54,-46.63);
-out center;
-```
-
-```shell
-java -jar target/vagai-1.0.0.jar --spring.profiles.active=importar --osm-arquivo=estacionamentos.json
-```
-
-Inicie a API no perfil normal e consulte `GET /estacionamentos` ou a busca por raio. Os locais importados trazem `fonte: "OpenStreetMap"`, o identificador original e `urlOsm` para abrir o elemento no mapa.
-
-O perfil importar inicia em modo de linha de comando e termina após uma requisição Overpass para uma caixa de até 0,25 grau por lado. A consulta usa nwr[amenity=parking] e out center. Para estacionamento comercial, a política inicial exige operador privado e acesso público explícitos, sem tags condicionais. Uma tarifa desconhecida fica nula. Os demais casos exigem informação complementar. GRATUITO e ROTATIVO aceitam cadastro colaborativo identificado, com verificação nula. A validação oficial de trechos e tarifas fica para fontes verificadas.
-
-A chave inclui o tipo do elemento, por exemplo way/42. A sincronização atualiza pelo mesmo ID interno e preserva contribuições. Quando um elemento retornado perde as evidências necessárias, o importador inativa o local importado correspondente. Elementos ausentes da resposta não são excluídos. access, fee, parking, capacity e charge disponíveis ficam na descrição. O preço numérico permanece desconhecido na importação. Uma falha interrompe a rotina, e os elementos já confirmados podem ser sincronizados novamente. Em 429 ou 5xx, aguarde antes de repetir. No mapa, atribua os dados a © OpenStreetMap contributors. [Overpass QL](https://wiki.openstreetmap.org/wiki/Overpass_API/Overpass_QL) · [Atribuição do OpenStreetMap](https://www.openstreetmap.org/copyright)
+A chave combina tipo e identificador, por exemplo way/42. Atualizações preservam IDs internos e contribuições. Um elemento retornado que perde os dados exigidos é inativado. Reexecutar a rotina atualiza elementos já confirmados. Inclua © OpenStreetMap contributors na apresentação dos dados importados. [Overpass QL](https://wiki.openstreetmap.org/wiki/Overpass_API/Overpass_QL)
 
 ## Docker e Render
 
-Gere a imagem com `docker build -t vagai .`. Com as três variáveis DB_* já exportadas no terminal, execute `docker run --rm -p 8080:8080 -e DB_URL -e DB_USER -e DB_PASSWORD vagai`. O Dockerfile compila com Maven/JDK 21 e executa o JAR em JRE 21.
+Use `docker build -t vagai .`. Com DB_URL, DB_USER e DB_PASSWORD exportadas, execute `docker run --rm -p 8080:8080 -e DB_URL -e DB_USER -e DB_PASSWORD vagai`. O Dockerfile compila com Maven/JDK 21 e executa em JRE 21.
 
-No Render, crie um Web Service para o repositório, escolha Docker e indique a pasta que contém o Dockerfile como Root Directory se necessário. Configure DB_URL, DB_USER, DB_PASSWORD, FRONTEND_ORIGIN, COOKIE_SECURE=true e COOKIE_SAME_SITE=none para um frontend HTTPS em outro site. Use uma instância com a sessão em memória. Reinícios encerram as sessões. Confirme que o Oracle aceita conexões de saída do serviço. Depois do deploy, valide GET /estacionamentos, login, JSESSIONID e GET /auth/me pelo navegador do frontend. [Docker no Render](https://render.com/docs/docker)
+No Render, crie um Web Service Docker, informe a raiz do backend e as variáveis do Oracle e frontend. Verifique a conectividade com a FIAP. Para frontend HTTPS em outro site, use COOKIE_SECURE=true e COOKIE_SAME_SITE=none. A sessão fica na memória de uma instância e termina em reinícios. [Docker no Render](https://render.com/docs/docker)
 
-## Verificação dos critérios FIAP
+## Validação e entrega
 
-| Critério | Evidência obtida em 16/11/2026 | Validação externa |
-|---|---|---|
-| Modelagem, 1:N e N:N | Seis tabelas, seis sequences, oito FKs, par único dos favoritos e DER. A suíte executou DDL, carga, UPDATE, DELETE e dez consultas no H2 em modo Oracle. | Repetir no esquema Oracle da FIAP e conferir os planos e resultados necessários à disciplina. |
-| DAO JDBC e CRUD | Tomcat recebeu requisições HTTP reais para as seis entidades. Os DAOs usaram DataSource e PreparedStatement. | Repetir o roteiro com ojdbc17 e as credenciais do grupo. |
-| DTOs, validação, rotas e HTTP | Entradas e saídas separadas, ModelMapper, rotas aninhadas e Location nas criações. | Demonstrar os contratos no Postman. |
-| Exceções e regras | A suíte verificou 400, 401, 403, 404, 405, 409 e 500. Testou duas contas, exclusão com dependências, validade dos relatos, raio e ordenação. | Demonstrar 400 e 404 no vídeo. |
-| CORS, sessão e frontend | Preflight de origem permitida e rejeitada, cookies, login, perfil e logout exercitados. | Validar no navegador com os domínios finais e integrar o React. |
-| Docker e Render | Maven gerou o JAR executável. Dockerfile multi-stage e configuração por ambiente entregues. | Docker indisponível nesta máquina. Construir a imagem, publicar e verificar acesso ao Oracle pelo serviço. |
-| Documentação | PDF com diagrama de classes e DER, contrato JSON e coleção Postman. | Preencher identificação e links da equipe. |
+A revisão da lista foi verificada com Spring MockMvc e H2 em modo Oracle, exercitando controllers, sessões, validação, CORS, SQL e DAOs. O ambiente bloqueou conexões locais do Tomcat, então esta revisão usa despacho de requisições em memória. A suíte executa os scripts de criação, carga e dez consultas. Verifica os três tipos por rua, bairro, tarifas, autoria, duplicidade de avaliações e favoritos, exclusão de conta, regras noturnas e importação por arquivo.
 
-**Resultado local:** Maven `clean verify` passou com dois testes de integração, zero falhas e zero erros. Um teste verifica CORS. O outro percorre toda a jornada dos motoristas, os scripts e a sincronização. A falha de banco provocada no fim desse teste verifica que o HTTP 500 oculta os detalhes internos.
+Oracle FIAP, conexão pública Overpass, imagem Docker, Render e integração React exigem validação externa. [Documentação técnica](docs/Documentacao-tecnica.pdf)
 
-**Overpass:** o serviço público retornou HTTP 502 no teste da revisão. O arquivo de uma resposta real anterior, com 19 elementos, também foi usado na validação. Nenhum deles identificava um operador privado com acesso público. No teste de integração controlado, a rotina importou node/42 e way/42, ignorou o elemento sem classificação, atualizou pelo arquivo JSON e preservou o favorito. A validação com Oracle FIAP continua pendente.
+Integrantes, RMs e turma aguardam os dados da equipe. Publicação e vídeo aguardam links reais.
 
-## Entrega e apresentação
+Roteiro de até cinco minutos. 0:00–0:35 problema. 0:35–1:25 login e pesquisa por rua. 1:25–2:20 lista com tipos e tarifas, reporte e favorito. 2:20–3:20 CRUD no Postman, 400 e 404. 3:20–4:15 controller, DTO, DAO e Oracle. 4:15–5:00 DER, regras e URL publicada.
 
-**Integrantes, RMs e turma:** preencher com os dados da equipe. **Publicação e vídeo:** links pendentes.
-
-[Documentação técnica](docs/Documentacao-tecnica.pdf) · [Contrato de integração](docs/API.md)
-
-**Roteiro de até cinco minutos.** 0:00–0:35 problema e público. 0:35–1:25 login e busca no frontend integrado. 1:25–2:20 reporte, nota e favorito no mapa. 2:20–3:20 CRUD no Postman e erros 400/404. 3:20–4:15 seguir um reporte do controller ao DTO, DAO e Oracle. 4:15–5:00 mostrar DER, autoria, expiração e URL publicada. A equipe precisa integrar o frontend, publicar e gravar o vídeo.
-
-**Uso de IA.** O Codex foi usado na implementação inicial, nos scripts, nos testes locais e na documentação. A equipe deve revisar as decisões e reproduzir a demonstração antes da entrega acadêmica.
+Uso de IA. O Codex auxiliou a implementação, scripts, testes e documentação. A equipe deve revisar e reproduzir a demonstração.
